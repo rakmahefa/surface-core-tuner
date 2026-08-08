@@ -1868,6 +1868,19 @@ version = "0.1.0"
 dependencies = [
  "eframe",
  "egui_plot",
+ "nyvoara-core",
+ "nyvoara-library",
+]
+
+[[package]]
+name = "nyvoara-core"
+version = "0.1.0"
+
+[[package]]
+name = "nyvoara-library"
+version = "0.1.0"
+dependencies = [
+ "nyvoara-core",
 ]
 
 [[package]]

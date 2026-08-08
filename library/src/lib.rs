@@ -1,8 +1,5 @@
-//! Sources génériques réutilisables : ScalarMetric, TextMetric.
-//! + fonction `build_sampler()` qui enregistre toutes les sources.
-
-use crate::core::*;
-use crate::paths;
+pub use nyvoara_core::core;
+pub use nyvoara_core::paths;
 
 pub mod battery;
 pub mod cpu;
@@ -15,6 +12,8 @@ pub mod thermal;
 // ────────────────────────────────────────────
 //  ScalarMetric — source scalaire générique
 // ────────────────────────────────────────────
+
+use crate::core::*;
 
 /// Lit un fichier sysfs/procfs, parse un f64, applique un scale.
 ///

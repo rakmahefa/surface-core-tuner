@@ -1,0 +1,11 @@
+[package]
+name = "nyvoara"
+version = "0.1.0"
+edition = "2021"
+description = "Power & Performance Management Dashboard - Surface Pro 7"
+
+[dependencies]
+nyvoara-core = { path = "../core" }
+nyvoara-library = { path = "../library" }
+eframe = { version = "0.30", features = ["wgpu"] }
+egui_plot = "0.30"

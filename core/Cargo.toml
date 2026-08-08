@@ -1,0 +1,8 @@
+[package]
+name = "nyvoara-core"
+version = "0.1.0"
+edition = "2021"
+description = "Core library of NyVoara Power & Performance Dashboard"
+
+[dependencies]
+# Standard dependencies (none needed so far except standard library)
