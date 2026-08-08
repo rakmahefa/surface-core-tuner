@@ -1,0 +1,10 @@
+[package]
+name = "nyvoara"
+version = "0.1.0"
+edition = "2021"
+description = "Power & Performance Management Dashboard - Surface Pro 7"
+
+[dependencies]
+# feature `wgpu` : backend de rendu Vulkan (défaut eframe : OpenGL/glow)
+eframe = { version = "0.30", features = ["wgpu"] }
+egui_plot = "0.30"
