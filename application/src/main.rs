@@ -11,7 +11,7 @@ mod gui;
 pub use nyvoara_core::core;
 pub use nyvoara_core::paths;
 pub use nyvoara_core::profiles;
-pub use nyvoara_library as sources;
+pub use nyvoara_library as lib;
 
 fn main() {
     // 1. Arguments
