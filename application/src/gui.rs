@@ -9,7 +9,7 @@
 //!   leurs points que sous des locks brefs.
 
 use crate::core::*;
-use crate::sources;
+use crate::library;
 use eframe::{egui, Frame};
 use egui_plot::{Line, Plot, PlotPoints};
 use std::sync::{Arc, Mutex};
@@ -64,7 +64,7 @@ pub fn run() {
             let ctx = cc.egui_ctx.clone();
             let poller_store = store.clone();
             std::thread::spawn(move || {
-                let mut sampler = sources::build_sampler();
+                let mut sampler = library::build_sampler();
                 loop {
                     let samples = sampler.poll_all();
                     poller_store.lock().unwrap().push_batch(samples);

@@ -5,13 +5,13 @@
 //! - `--cli --watch` : continu, rafraîchit toutes les secondes
 
 use crate::core::*;
-use crate::sources;
+use crate::library;
 use std::io::{stdout, Write};
 use std::time::Duration;
 
 /// Lance le mode CLI.
 pub fn run(watch: bool) {
-    let mut sampler = sources::build_sampler();
+    let mut sampler = library::build_sampler();
 
     if watch {
         run_watch(&mut sampler);
