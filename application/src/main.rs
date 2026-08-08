@@ -6,11 +6,12 @@
 
 mod args;
 mod cli;
-mod core;
 mod gui;
-mod paths;
-mod profiles;
-mod sources;
+
+pub use nyvoara_core::core;
+pub use nyvoara_core::paths;
+pub use nyvoara_core::profiles;
+pub use nyvoara_library::sources;
 
 fn main() {
     // 1. Arguments

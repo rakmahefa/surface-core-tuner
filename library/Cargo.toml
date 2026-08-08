@@ -1,0 +1,8 @@
+[package]
+name = "nyvoara-library"
+version = "0.1.0"
+edition = "2021"
+description = "Library of sources and metric collectors for NyVoara"
+
+[dependencies]
+nyvoara-core = { path = "../core" }
