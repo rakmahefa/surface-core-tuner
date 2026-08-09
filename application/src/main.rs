@@ -6,7 +6,9 @@
 
 mod args;
 mod cli;
+mod components;
 mod gui;
+mod themes;
 
 pub use nyvoara_core::core;
 pub use nyvoara_core::paths;
