@@ -1,7 +1,12 @@
 //! Onglet Profils : prédéfinis, personnalisés (apply/delete) et
 //! sauvegarde des réglages courants.
+//!
+//! Post-audit : chaque profil est une carte avec nom en gras et description
+//! atténuée (hiérarchie lisible), badge ACTIVE (plus de glyphe « coche »),
+//! boutons Apply/Delete à vraie taille tactile, feedback en bandeau sans
+//! emoji, formulaire de sauvegarde regroupé dans une carte.
 
-use super::section;
+use super::{badge, card, section};
 use crate::core::{ReadLatest, View};
 use crate::profiles::{self, Profile};
 use crate::themes::palette;
@@ -45,10 +50,21 @@ enum ProfileAction {
 /// Rendu de l'onglet Profils : prédéfinis, personnalisés (apply/delete),
 /// sauvegarde des réglages courants.
 pub(crate) fn render_profiles(ui: &mut egui::Ui, view: &View, tab: &mut ProfileTab) {
-    ui.heading("Profiles");
-    ui.label("Apply a predefined power profile, then fine-tune with the CPU/GPU sliders.");
+    ui.label(
+        egui::RichText::new("Profiles")
+            .monospace()
+            .size(20.0)
+            .strong()
+            .color(palette().value),
+    );
+    ui.label(
+        egui::RichText::new("Apply a power profile, then fine-tune with the CPU/GPU sliders.")
+            .small()
+            .color(palette().muted),
+    );
+    ui.add_space(6.0);
 
-    // Feedback teinté : visible immédiatement, distinct du texte courant.
+    // Feedback en bandeau teinté : visible, distinct du contenu courant.
     if let Some((ok, msg)) = &tab.feedback {
         let p = palette();
         let (fill, fg) = if *ok {
@@ -56,12 +72,13 @@ pub(crate) fn render_profiles(ui: &mut egui::Ui, view: &View, tab: &mut ProfileT
         } else {
             (p.tint(p.crit, 22), p.crit_soft)
         };
-        egui::Frame::none()
+        egui::Frame::default()
             .fill(fill)
-            .rounding(egui::Rounding::same(4.0))
-            .inner_margin(egui::Margin::symmetric(8.0, 6.0))
+            .stroke(egui::Stroke::new(1.0_f32, fg))
+            .rounding(egui::Rounding::same(6.0))
+            .inner_margin(egui::Margin::symmetric(10.0, 7.0))
             .show(ui, |ui| {
-                ui.colored_label(fg, msg);
+                ui.label(egui::RichText::new(msg).small().strong().color(fg));
             });
         ui.add_space(4.0);
     }
@@ -70,16 +87,20 @@ pub(crate) fn render_profiles(ui: &mut egui::Ui, view: &View, tab: &mut ProfileT
 
     let mut action = None;
     for p in predefined {
-        action = profile_row(ui, view, p, false).or(action);
+        action = profile_card(ui, view, p, false).or(action);
     }
 
-    ui.separator();
+    ui.add_space(6.0);
     section(ui, "Custom Profiles");
     if custom.is_empty() {
-        ui.label("None yet — save your current settings below.");
+        ui.label(
+            egui::RichText::new("None yet — save your current settings below.")
+                .small()
+                .color(palette().muted),
+        );
     }
     for p in custom {
-        action = profile_row(ui, view, p, true).or(action);
+        action = profile_card(ui, view, p, true).or(action);
     }
 
     // Exécute l'action demandée une fois les emprunts des lignes terminés.
@@ -88,10 +109,10 @@ pub(crate) fn render_profiles(ui: &mut egui::Ui, view: &View, tab: &mut ProfileT
             ProfileAction::Apply => {
                 let feedback = match profiles::find(&tab.profiles, &name) {
                     Some(p) => match p.apply() {
-                        Ok(()) => (true, format!("✓ Profile «{name}» applied.")),
-                        Err(e) => (false, format!("⚠ «{name}»: {e}")),
+                        Ok(()) => (true, format!("Profile \"{name}\" applied.")),
+                        Err(e) => (false, format!("\"{name}\": {e}")),
                     },
-                    None => (false, format!("⚠ Profile «{name}» not found.")),
+                    None => (false, format!("Profile \"{name}\" not found.")),
                 };
                 tab.feedback = Some(feedback);
             }
@@ -99,30 +120,49 @@ pub(crate) fn render_profiles(ui: &mut egui::Ui, view: &View, tab: &mut ProfileT
                 tab.feedback = Some(match profiles::remove_custom(&name) {
                     Ok(_) => {
                         tab.reload();
-                        (true, format!("✓ «{name}» deleted."))
+                        (true, format!("\"{name}\" deleted."))
                     }
-                    Err(e) => (false, format!("⚠ {e}")),
+                    Err(e) => (false, format!("{e}")),
                 });
             }
         }
     }
 
     // ── Sauvegarde des réglages courants ──
-    ui.separator();
-    section(ui, "Save Current Settings");
-    ui.label("Captures the current governor and frequency caps as a reusable profile.");
-    ui.horizontal(|ui| {
-        ui.label("Name:");
-        ui.text_edit_singleline(&mut tab.new_name);
-        if ui.button("Save").clicked() {
-            save_profile(tab, view);
-        }
+    ui.add_space(6.0);
+    card(ui, |ui| {
+        section(ui, "Save Current Settings");
+        ui.label(
+            egui::RichText::new("Captures the current governor and frequency caps as a reusable profile.")
+                .small()
+                .color(palette().muted),
+        );
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.label("Name:");
+            ui.add(
+                egui::TextEdit::singleline(&mut tab.new_name)
+                    .desired_width(220.0)
+                    .hint_text("e.g. Silent evening"),
+            );
+            if ui
+                .add(
+                    egui::Button::new(
+                        egui::RichText::new("Save profile").monospace().strong(),
+                    )
+                    .min_size(egui::vec2(96.0, 28.0)),
+                )
+                .clicked()
+            {
+                save_profile(tab, view);
+            }
+        });
     });
 }
 
-/// Affiche une ligne de profil : nom, description, badge actif, boutons.
+/// Carte de profil : nom, description, badge actif, boutons.
 /// Retourne l'action demandée (exécutée par l'appelant après la boucle).
-fn profile_row(
+fn profile_card(
     ui: &mut egui::Ui,
     view: &View,
     p: &Profile,
@@ -130,21 +170,49 @@ fn profile_row(
 ) -> Option<(ProfileAction, String)> {
     let mut action = None;
     let active = p.is_active(view);
-    // Ligne complète : description à gauche, badge/boutons à droite.
-    let mut row = |ui: &mut egui::Ui| {
+    let body = |ui: &mut egui::Ui| {
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
-                ui.strong(&p.name);
-                ui.label(describe_profile(p, view));
+                ui.label(
+                    egui::RichText::new(&p.name)
+                        .monospace()
+                        .size(15.0)
+                        .strong()
+                        .color(palette().value),
+                );
+                ui.label(
+                    egui::RichText::new(describe_profile(p, view))
+                        .small()
+                        .color(palette().muted),
+                );
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if active {
-                    ui.colored_label(palette().ok, "✓ active");
+                    badge(ui, "ACTIVE", palette().ok_soft);
                 }
-                if ui.button("Apply").clicked() {
+                if ui
+                    .add(
+                        egui::Button::new(
+                            egui::RichText::new("Apply").monospace().strong(),
+                        )
+                        .min_size(egui::vec2(80.0, 28.0)),
+                    )
+                    .clicked()
+                {
                     action = Some((ProfileAction::Apply, p.name.clone()));
                 }
-                if custom && ui.button("Delete").clicked() {
+                if custom
+                    && ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new("Delete")
+                                    .monospace()
+                                    .color(palette().crit),
+                            )
+                            .min_size(egui::vec2(80.0, 28.0)),
+                        )
+                        .clicked()
+                {
                     action = Some((ProfileAction::Delete, p.name.clone()));
                 }
             });
@@ -152,15 +220,16 @@ fn profile_row(
     };
     // Le profil actif est surligné pour un repérage immédiat dans la liste.
     if active {
-        egui::Frame::none()
+        egui::Frame::default()
             .fill(palette().tint(palette().ok, 14))
-            .rounding(egui::Rounding::same(4.0))
-            .inner_margin(egui::Margin::symmetric(8.0, 4.0))
-            .show(ui, row);
+            .stroke(egui::Stroke::new(1.5_f32, palette().ok_soft))
+            .rounding(egui::Rounding::same(8.0))
+            .inner_margin(egui::Margin::same(12.0))
+            .show(ui, body);
     } else {
-        row(ui);
+        card(ui, body);
     }
-    ui.separator();
+    ui.add_space(6.0);
     action
 }
 
@@ -168,14 +237,14 @@ fn profile_row(
 fn save_profile(tab: &mut ProfileTab, view: &View) {
     let name = tab.new_name.trim().to_string();
     if name.is_empty() {
-        tab.feedback = Some((false, "⚠ Name required.".into()));
+        tab.feedback = Some((false, "A name is required.".into()));
         return;
     }
     let reserved = profiles::predefined()
         .iter()
         .any(|p| p.name.eq_ignore_ascii_case(&name));
     if reserved {
-        tab.feedback = Some((false, "⚠ Name already used by a predefined profile.".into()));
+        tab.feedback = Some((false, "Name already used by a predefined profile.".into()));
         return;
     }
     match Profile::from_store(view, &name) {
@@ -183,14 +252,14 @@ fn save_profile(tab: &mut ProfileTab, view: &View) {
             Ok(_) => {
                 tab.new_name.clear();
                 tab.reload();
-                tab.feedback = Some((true, format!("✓ Profile «{name}» saved.")));
+                tab.feedback = Some((true, format!("Profile \"{name}\" saved.")));
             }
-            Err(e) => tab.feedback = Some((false, format!("⚠ {e}"))),
+            Err(e) => tab.feedback = Some((false, format!("{e}"))),
         },
         None => {
             tab.feedback = Some((
                 false,
-                "⚠ Nothing to capture: no governor/frequency readings available.".into(),
+                "Nothing to capture: no governor/frequency readings available.".into(),
             ))
         }
     }
@@ -237,6 +306,6 @@ fn range_text(prefix: &str, values: &[f64]) -> String {
     if lo == hi {
         format!("{prefix} {lo:.0} MHz")
     } else {
-        format!("{prefix} {lo:.0}–{hi:.0} MHz")
+        format!("{prefix} {lo:.0}-{hi:.0} MHz")
     }
 }
