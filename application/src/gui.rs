@@ -1,9 +1,9 @@
 //! Application graphique — egui dashboard.
 //!
 //! Ce module ne contient que la coquille applicative : fenêtre eframe,
-//! thème, panneaux (entête avec onglets, barre de statut, contenu) et le
-//! routage vers les onglets. Le rendu de chaque onglet et les helpers
-//! d'affichage partagés vivent dans [`components`].
+//! thème, panneaux (entête avec onglets en pilules, barre de statut,
+//! contenu) et le routage vers les onglets. Le rendu de chaque onglet et
+//! les helpers d'affichage partagés vivent dans [`components`].
 //!
 //! Architecture :
 //! - Thread d'arrière-plan qui échantillonne les sources à `FPS` (5 Hz)
@@ -45,8 +45,8 @@ pub fn run() {
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([960.0, 680.0])
-            .with_min_inner_size([800.0, 500.0])
+            .with_inner_size([1000.0, 700.0])
+            .with_min_inner_size([820.0, 560.0])
             .with_title("NyVoara — Power & Performance"),
         // Backend de rendu : wgpu (Vulkan préféré), pas l'OpenGL par défaut.
         renderer: eframe::Renderer::Wgpu,
@@ -61,7 +61,8 @@ pub fn run() {
         "NyVoara",
         options,
         Box::new(|cc| {
-            // Thème global : rétro clair « Game Boy » + cibles tactiles élargies (Surface).
+            // Thème global : rétro clair « Game Boy » raffiné + cibles
+            // tactiles (Surface). Aucun emoji : polices non couvrantes.
             theme().apply(&cc.egui_ctx);
 
             // Spawn le thread de polling, avec ctx pour request_repaint
@@ -102,7 +103,7 @@ fn wgpu_options() -> eframe::egui_wgpu::WgpuConfiguration {
 
 // ── Tabs ────────────────────────────────────
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone, Copy)]
 enum Tab {
     Profiles,
     Cpu,
@@ -141,97 +142,172 @@ impl eframe::App for Dashboard {
                 .map(|s| s.split_whitespace().map(String::from).collect());
         }
 
-        // ── Header + Tabs ──
+        // ── Header + onglets ──
         egui::TopBottomPanel::top("header")
-            .show_separator_line(true)
+            .show_separator_line(false)
             .frame(egui::Frame {
-                // Crème type entête du site (le corps, lui, reste papier).
                 fill: ctx.style().visuals.window_fill,
-                inner_margin: egui::Margin::symmetric(10.0, 8.0),
+                inner_margin: egui::Margin::symmetric(14.0, 8.0),
                 ..Default::default()
             })
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    ui.heading(egui::RichText::new("⚡ NYVOARA").color(palette().value));
-                    ui.label("Power & Performance Dashboard");
+                    ui.label(
+                        egui::RichText::new("NYVOARA")
+                            .monospace()
+                            .size(19.0)
+                            .strong()
+                            .color(palette().accent),
+                    );
+                    ui.label(
+                        egui::RichText::new("Power & Performance Dashboard")
+                            .small()
+                            .color(palette().muted),
+                    );
+                    // Profil actif visible en permanence, à droite de l'entête.
+                    if let Some(p) = self
+                        .profile_tab
+                        .profiles
+                        .iter()
+                        .find(|p| p.is_active(&view))
+                    {
+                        ui.with_layout(
+                            egui::Layout::right_to_left(egui::Align::Center),
+                            |ui| {
+                                crate::components::badge(ui, "ACTIVE", palette().ok_soft);
+                                ui.label(
+                                    egui::RichText::new(&p.name)
+                                        .monospace()
+                                        .color(palette().value),
+                                );
+                            },
+                        );
+                    }
                 });
-                ui.add_space(4.0);
-                // Bande d'onglets : fond discret pour la distinguer du contenu.
-                egui::Frame::none()
-                    .fill(ctx.style().visuals.faint_bg_color)
-                    .rounding(egui::Rounding::same(6.0))
-                    .inner_margin(egui::Margin::symmetric(4.0, 3.0))
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            tab_button(ui, &mut self.tab, Tab::Profiles, "Profiles");
-                            tab_button(ui, &mut self.tab, Tab::Cpu, "CPU");
-                            tab_button(ui, &mut self.tab, Tab::Gpu, "GPU");
-                            tab_button(ui, &mut self.tab, Tab::Memory, "Memory");
-                            tab_button(ui, &mut self.tab, Tab::Battery, "Battery");
-                            tab_button(ui, &mut self.tab, Tab::Thermal, "Thermal");
-                            tab_button(ui, &mut self.tab, Tab::Io, "I/O");
-                            tab_button(ui, &mut self.tab, Tab::Network, "Network");
-                        });
-                    });
+                ui.add_space(6.0);
+                // Bande d'onglets en pilules : l'onglet actif est plein
+                // (rouge + texte blanc), les autres restent des boutons
+                // standards (survol crème). Aucun glyphe d'emoji.
+                ui.horizontal(|ui| {
+                    tab_button(ui, &mut self.tab, Tab::Profiles, "Profiles");
+                    tab_button(ui, &mut self.tab, Tab::Cpu, "CPU");
+                    tab_button(ui, &mut self.tab, Tab::Gpu, "GPU");
+                    tab_button(ui, &mut self.tab, Tab::Memory, "Memory");
+                    tab_button(ui, &mut self.tab, Tab::Battery, "Battery");
+                    tab_button(ui, &mut self.tab, Tab::Thermal, "Thermal");
+                    tab_button(ui, &mut self.tab, Tab::Io, "I/O");
+                    tab_button(ui, &mut self.tab, Tab::Network, "Network");
+                });
             });
 
-        // ── Status bar (essentiel uniquement : batterie, AC, CPU0, profil) ──
-        egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                // Batterie : capacité colorée selon les seuils (bas = critique)
-                if let Some(cap) = view.num("battery", "Capacity") {
-                    let color = palette().threshold(100.0 - cap, BATTERY_WARN, BATTERY_CRIT);
-                    ui.colored_label(color, format!("🔋 {cap:.0}%"));
-                    ui.separator();
-                }
-                if let Some(ac) = view.num("battery", "AC Online") {
-                    if ac > 0.0 {
-                        ui.colored_label(palette().ok, "AC connected");
-                    } else {
-                        ui.colored_label(palette().warn, "On battery");
+        // ── Status bar (essentiel : batterie, AC, charge moyenne, CPU0) ──
+        egui::TopBottomPanel::bottom("status")
+            .frame(egui::Frame {
+                fill: ctx.style().visuals.window_fill,
+                inner_margin: egui::Margin::symmetric(14.0, 6.0),
+                ..Default::default()
+            })
+            .show_separator_line(true)
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    // Batterie : capacité colorée selon les seuils (bas = critique)
+                    if let Some(cap) = view.num("battery", "Capacity") {
+                        let color = palette().threshold(100.0 - cap, BATTERY_WARN, BATTERY_CRIT);
+                        ui.label(
+                            egui::RichText::new(format!("Battery {cap:.0}%"))
+                                .monospace()
+                                .strong()
+                                .color(color),
+                        );
+                        ui.separator();
                     }
-                    ui.separator();
-                }
-                if let Some(freq) = view.num("cpu", "CPU0 Freq") {
-                    ui.label(format!("CPU0: {freq:.0} MHz"));
-                    ui.separator();
-                }
-                if let Some(p) = self
-                    .profile_tab
-                    .profiles
-                    .iter()
-                    .find(|p| p.is_active(&view))
-                {
-                    ui.label(format!("Profile: {}", p.name));
-                }
+                    if let Some(ac) = view.num("battery", "AC Online") {
+                        if ac > 0.0 {
+                            ui.colored_label(palette().ok, "AC connected");
+                        } else {
+                            ui.colored_label(palette().warn, "On battery");
+                        }
+                        ui.separator();
+                    }
+                    // Charge moyenne des cœurs visibles (dérivée des CPUx Load).
+                    let loads: Vec<f64> = (0..8)
+                        .filter_map(|c| view.num("cpu", &format!("CPU{c} Load")))
+                        .collect();
+                    if !loads.is_empty() {
+                        let avg = loads.iter().sum::<f64>() / loads.len() as f64;
+                        let color =
+                            palette().threshold(avg, super::components::LOAD_WARN, super::components::LOAD_CRIT);
+                        ui.label(
+                            egui::RichText::new(format!("Load avg {avg:.0}%"))
+                                .monospace()
+                                .strong()
+                                .color(color),
+                        );
+                        ui.separator();
+                    }
+                    if let Some(freq) = view.num("cpu", "CPU0 Freq") {
+                        ui.label(
+                            egui::RichText::new(format!("CPU0 {freq:.0} MHz"))
+                                .monospace()
+                                .color(palette().value),
+                        );
+                    }
+                });
             });
-        });
 
         // ── Content ──
         let mut profile_ctrl = std::mem::take(&mut self.profile_tab);
-        egui::CentralPanel::default().show(ctx, |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| match self.tab {
-                Tab::Profiles => profiles::render_profiles(ui, &view, &mut profile_ctrl),
-                Tab::Cpu => cpu::render_cpu(ui, &view, &self.store, &self.governors),
-                Tab::Gpu => gpu::render_gpu(ui, &view, &self.store),
-                Tab::Memory => memory::render_memory(ui, &view, &self.store),
-                Tab::Battery => battery::render_battery(ui, &view),
-                Tab::Thermal => thermal::render_thermal(ui, &view),
-                Tab::Io => io::render_io(ui, &view),
-                Tab::Network => network::render_network(ui, &view),
+        egui::CentralPanel::default()
+            .frame(egui::Frame {
+                // Fill explicite : un Frame sans fill est transparent et
+                // laisse voir la couleur de clear (sombre) sous le panel.
+                fill: ctx.style().visuals.panel_fill,
+                inner_margin: egui::Margin::symmetric(14.0, 10.0),
+                ..Default::default()
+            })
+            .show(ctx, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| match self.tab {
+                    Tab::Profiles => profiles::render_profiles(ui, &view, &mut profile_ctrl),
+                    Tab::Cpu => cpu::render_cpu(ui, &view, &self.store, &self.governors),
+                    Tab::Gpu => gpu::render_gpu(ui, &view, &self.store),
+                    Tab::Memory => memory::render_memory(ui, &view, &self.store),
+                    Tab::Battery => battery::render_battery(ui, &view),
+                    Tab::Thermal => thermal::render_thermal(ui, &view),
+                    Tab::Io => io::render_io(ui, &view, &self.store),
+                    Tab::Network => network::render_network(ui, &view, &self.store),
+                });
             });
-        });
         self.profile_tab = profile_ctrl;
     }
 }
 
+/// Pilule d'onglet : bouton monospace à liseré encre ; l'onglet actif est
+/// rempli de rouge avec texte blanc — impossible à manquer, aucun glyphe
+/// de remplacement possible (rendu 100 % bouton, pas de sélection egui).
 fn tab_button(ui: &mut egui::Ui, active: &mut Tab, tab: Tab, label: &str) {
     let selected = *active == tab;
-    // Majuscules façon « pixel-font » du site de référence.
-    if ui
-        .selectable_label(selected, label.to_uppercase())
-        .clicked()
-    {
+    let ink = egui::Color32::from_rgb(23, 23, 23);
+    let text = egui::RichText::new(label)
+        .monospace()
+        .strong()
+        .color(if selected {
+            egui::Color32::WHITE
+        } else {
+            palette().value
+        });
+    let button = if selected {
+        egui::Button::new(text)
+            .fill(palette().accent)
+            .stroke(egui::Stroke::new(1.5_f32, ink))
+            .rounding(6.0)
+            .min_size(egui::vec2(0.0, 26.0))
+    } else {
+        egui::Button::new(text)
+            .stroke(egui::Stroke::new(1.5_f32, ink))
+            .rounding(6.0)
+            .min_size(egui::vec2(0.0, 26.0))
+    };
+    if ui.add(button).clicked() {
         *active = tab;
     }
 }

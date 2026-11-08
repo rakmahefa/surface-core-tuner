@@ -1,10 +1,16 @@
 //! Composants d'affichage de l'interface graphique.
 //!
-//! `mod.rs` regroupe les helpers partagés par tous les onglets :
-//! sections, métriques, barres de niveau, graphes temporels et contrôles
-//! de fréquence. Chaque onglet vit dans son propre module (`profiles`,
-//! `cpu`, `gpu`, `memory`, `battery`, `thermal`, `io`, `network`), avec
-//! une fonction `render_*` unique qui dessine son contenu.
+//! `mod.rs` regroupe les briques partagées par tous les onglets : cartes,
+//! en-têtes de section, tableaux de métriques (deux colonnes stables, sans
+//! chevauchement), barres de niveau, graphiques temporels bornés, états
+//! vides et contrôles de fréquence sécurisés. Chaque onglet vit dans son
+//! propre module avec une fonction `render_*` unique.
+//!
+//! Règles issues de l'audit UI/UX :
+//! - aucune valeur ne s'affiche en rouge (rouge = seuil critique uniquement) ;
+//! - aucune donnée manquante ne se confond avec une valeur (tiret atténué) ;
+//! - aucun emoji dans les libellés (polices egui non couvrantes) ;
+//! - les graphiques affichent exactement la fenêtre annoncée.
 
 pub(crate) mod battery;
 pub(crate) mod cpu;
@@ -22,10 +28,8 @@ use egui_plot::{Line, Plot, PlotPoints};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-/// Largeur des barres de progression.
-const BAR_WIDTH: f32 = 400.0;
-/// Hauteur uniforme des graphes temporels.
-const CHART_HEIGHT: f32 = 160.0;
+/// Hauteur uniforme des graphiques temporels.
+const CHART_HEIGHT: f32 = 150.0;
 
 // Seuils de code couleur (vert → jaune → rouge), centralisés pour être
 // accordables au même endroit.
@@ -39,32 +43,105 @@ pub(crate) const ZONE_TEMP_CRIT: f64 = 80.0;
 pub(crate) const BATTERY_WARN: f64 = 50.0;
 pub(crate) const BATTERY_CRIT: f64 = 80.0;
 
-/// En-tête de section : espacement vertical régulier + titre en gras.
+// ── Cartes et sections ──────────────────────
+
+/// Carte : cadre crème à liseré encre, le conteneur de base des sections.
+/// Retourne le rendu du contenu passé en closure.
+pub(crate) fn card<R>(
+    ui: &mut egui::Ui,
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
+    egui::Frame::default()
+        .fill(palette().card)
+        .stroke(egui::Stroke::new(1.5_f32, egui::Color32::from_rgb(23, 23, 23)))
+        .rounding(egui::Rounding::same(8.0))
+        .inner_margin(egui::Margin::same(12.0))
+        .show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            add_contents(ui)
+        })
+        .inner
+}
+
+/// En-tête de section : petites capitales atténuées + espacement régulier.
+/// Se distingue du corps par la taille, la couleur et la graisse.
 pub(crate) fn section(ui: &mut egui::Ui, title: &str) {
-    ui.add_space(6.0);
-    ui.strong(title);
+    ui.add_space(4.0);
+    ui.label(
+        egui::RichText::new(title.to_uppercase())
+            .small()
+            .strong()
+            .color(palette().muted),
+    );
+    ui.add_space(2.0);
 }
 
-/// Mention « (read-only) » — secondaire mais lisible.
-pub(crate) fn readonly_note(ui: &mut egui::Ui) {
-    ui.colored_label(palette().muted, "(read-only)");
-}
-
-/// Ligne « label | valeur » alignée à droite, « — » si valeur absente.
-pub(crate) fn metric_row(ui: &mut egui::Ui, label: &str, display: Option<String>) {
-    ui.horizontal(|ui| {
-        ui.label(label);
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            match display {
-                Some(d) => {
-                    ui.colored_label(palette().value, d);
-                }
-                None => {
-                    ui.colored_label(palette().muted, "—");
-                }
-            };
+/// Badge d'état compact (ex. « ACTIVE », « AC ») : texte coloré sur fond teinté.
+pub(crate) fn badge(ui: &mut egui::Ui, text: &str, color: egui::Color32) {
+    egui::Frame::default()
+        .fill(palette().tint(color, 26))
+        .stroke(egui::Stroke::new(1.0_f32, color))
+        .rounding(egui::Rounding::same(4.0))
+        .inner_margin(egui::Margin::symmetric(7.0, 2.0))
+        .show(ui, |ui| {
+            ui.label(egui::RichText::new(text).small().strong().color(color));
         });
-    });
+}
+
+/// État vide explicite : titre, explication de la cause, pas de silence.
+/// Occupe toute la largeur et centre son contenu pour éviter les pages
+/// « désertes ».
+pub(crate) fn empty_state(ui: &mut egui::Ui, title: &str, explanation: &str) {
+    egui::Frame::default()
+        .fill(palette().card)
+        .stroke(egui::Stroke::new(1.0_f32, palette().muted))
+        .rounding(egui::Rounding::same(8.0))
+        .inner_margin(egui::Margin::same(28.0))
+        .show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            ui.vertical_centered(|ui| {
+                ui.add_space(8.0);
+                ui.label(
+                    egui::RichText::new(title)
+                        .monospace()
+                        .size(16.0)
+                        .strong()
+                        .color(palette().muted),
+                );
+                ui.add_space(4.0);
+                ui.label(egui::RichText::new(explanation).small().color(palette().muted));
+                ui.add_space(8.0);
+            });
+        });
+}
+
+// ── Tableaux de métriques ───────────────────
+
+/// Ligne « libellé | valeur » dans une grille à deux colonnes dédiées.
+///
+/// Contraisent à l'ancien helper (valeur en layout right-to-left *dans* la
+/// cellule du libellé), chaque donnée dispose de sa propre colonne : aucun
+/// chevauchement possible, et les valeurs s'alignent verticalement.
+pub(crate) fn metric_row(ui: &mut egui::Ui, label: &str, display: Option<String>) {
+    ui.label(label);
+    match display {
+        Some(d) => {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(
+                    egui::RichText::new(d)
+                        .monospace()
+                        .strong()
+                        .color(palette().value),
+                );
+            });
+        }
+        None => {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.colored_label(palette().muted, "— no data");
+            });
+        }
+    }
+    ui.end_row();
 }
 
 /// Dernière valeur d'une métrique, formatée avec son unité native.
@@ -72,16 +149,24 @@ pub(crate) fn metric(ui: &mut egui::Ui, view: &View, kind: &str, label: &str) {
     metric_row(ui, label, view.get(kind, label).map(|s| s.display()));
 }
 
-/// Métrique de fréquence — toujours en MHz (échelle homogène dans l'UI).
-pub(crate) fn metric_mhz(ui: &mut egui::Ui, view: &View, kind: &str, label: &str) {
-    metric_row(
-        ui,
-        label,
-        view.num(kind, label).map(|v| format!("{v:.0} MHz")),
-    );
+/// Grille de métriques « libellé / valeur » : deux colonnes stables.
+/// `pairs` liste les métriques à afficher, dans l'ordre.
+pub(crate) fn metric_grid(ui: &mut egui::Ui, id: &str, view: &View, kind: &str, labels: &[&str]) {
+    egui::Grid::new(format!("metrics_{id}"))
+        .num_columns(2)
+        .spacing([24.0, 5.0])
+        .show(ui, |ui| {
+            for label in labels {
+                metric(ui, view, kind, label);
+            }
+        });
 }
 
 /// Barre de niveau avec code couleur de seuils.
+///
+/// Le texte (valeur) est sorti de la barre : plus de libellé écrasé par le
+/// remplissage. La barre occupe l'espace restant, la valeur en monospace
+/// se place à droite.
 ///
 /// `invert` : vrai quand une valeur basse est critique (ex. batterie) —
 /// les seuils sont alors appliqués à `100 − value`.
@@ -96,18 +181,33 @@ pub(crate) fn level_bar(
     let badness = if invert { 100.0 - value } else { value };
     let color = palette().threshold(badness, warn, crit);
     let frac = (value.clamp(0.0, 100.0) / 100.0) as f32;
-    ui.add(
-        egui::ProgressBar::new(frac)
-            .text(text)
-            .desired_width(BAR_WIDTH)
-            .fill(color),
-    );
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new(text).color(palette().value));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(
+                egui::RichText::new(format!("{value:.1}%"))
+                    .monospace()
+                    .strong()
+                    .color(color),
+            );
+            ui.add(
+                egui::ProgressBar::new(frac)
+                    .desired_width(ui.available_width().max(120.0))
+                    .fill(color),
+            );
+        });
+    });
 }
 
 /// Avertit quand min > max (le kernel clampe silencieusement ces réglages).
 pub(crate) fn range_warning(ui: &mut egui::Ui, min: f64, max: f64) {
     if min > max {
-        ui.colored_label(palette().warn, "⚠ min > max — clampé par le matériel");
+        ui.label(
+            egui::RichText::new("! min > max — the kernel will clamp these values")
+                .small()
+                .strong()
+                .color(palette().warn),
+        );
     }
 }
 
@@ -138,16 +238,20 @@ fn chart_points(
         .collect()
 }
 
-/// Affiche un graphe temporel pour une métrique numérique : en-tête
-/// (titre dérivé de la fenêtre + valeur courante) puis courbe.
-/// Utilise le ring buffer `Store.history` déjà alimenté par le polling.
+/// Affiche un graphe temporel pour une métrique numérique.
+///
+/// Bornes X fixes sur la fenêtre demandée (l'axe ne « ment » plus : la
+/// fenêtre annoncée est la fenêtre affichée, 0 = maintenant à droite).
+/// L'axe Y est borné par `y_max` quand il est fourni (pourcentages).
 pub(crate) fn time_chart(
     ui: &mut egui::Ui,
     store: &Arc<Mutex<Store>>,
     kind: &str,
     label: &str,
+    title: &str,
     color: egui::Color32,
     window_secs: f64,
+    y_max: Option<f64>,
 ) {
     let points = chart_points(store, kind, label, window_secs);
 
@@ -155,44 +259,65 @@ pub(crate) fn time_chart(
     let current = store.lock().unwrap().get(kind, label).map(|s| s.display());
     let mins = (window_secs / 60.0).round() as u64;
     ui.horizontal(|ui| {
-        ui.strong(format!("{label} History ({mins} min)"));
-        if let Some(cur) = current {
-            ui.colored_label(color, cur);
-        }
+        ui.label(egui::RichText::new(title).strong().color(palette().value));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if let Some(cur) = current {
+                ui.label(
+                    egui::RichText::new(format!("{cur} — last {mins} min"))
+                        .small()
+                        .color(palette().muted),
+                );
+            }
+        });
     });
 
     if points.len() < 2 {
-        ui.label("⏳ collecting…");
+        ui.label(
+            egui::RichText::new("collecting data…")
+                .small()
+                .color(palette().muted),
+        );
         return;
     }
 
+    // Bornes Y : fournies (pourcentages) ou dérivées des données.
+    let data_max = points
+        .iter()
+        .map(|p| p[1])
+        .fold(f64::NEG_INFINITY, f64::max);
+    let y_top = y_max.unwrap_or((data_max * 1.25).max(1.0));
+
     let line = Line::new(PlotPoints::from(points))
         .color(color)
-        .width(1.5_f32)
+        .width(2.0_f32)
         .name(label);
 
     Plot::new(format!("chart_{kind}_{label}"))
         .height(CHART_HEIGHT)
-        .x_axis_label("seconds")
-        .show_grid(true)
+        .show_axes([true, true])
+        .show_grid([true, true])
         .show(ui, |plot_ui| {
+            // Bornes fixes : la fenêtre annoncée est la fenêtre affichée.
+            // Petite marge négative en bas de l'axe Y pour que le label
+            // « 0 » ne collisionne pas avec le premier label de l'axe X.
+            let y_bottom = -y_top * 0.06;
+            let bounds = egui_plot::PlotBounds::from_min_max(
+                [-window_secs, y_bottom],
+                [0.0, y_top],
+            );
+            plot_ui.set_plot_bounds(bounds);
             plot_ui.line(line);
         });
 }
 
-// ── Frequency slider helper ────────────────
+// ── Frequency slider helper ─────────────────
 
-/// Slider de fréquence.
+/// Slider de fréquence, rendu uniquement si les limites matérielles sont
+/// connues et cohérentes. Sinon affiche un état « indisponible » explicite
+/// (fini les sliders muets à « 0 MHz »).
 ///
 /// Retourne `Some(valeur_en_mhz)` si l'utilisateur a terminé un
-/// changement (fin de drag, clic ou clavier), `None` sinon. L'appelant
-/// décide du chemin d'écriture.
-///
-/// - Lit la valeur extracte depuis le View
-/// - Bornes depuis les labels `hw_min_label` / `hw_max_label`
-/// - L'écriture n'est déclenchée qu'à la fin du drag (jamais en rafale)
-/// - `display` : texte affiché à côté du slider (vide dans les grilles
-///   denses où l'en-tête de colonne suffit)
+/// changement (fin de drag, clic ou clavier), `None` sinon.
 pub(crate) fn freq_slider(
     ui: &mut egui::Ui,
     view: &View,
@@ -202,13 +327,27 @@ pub(crate) fn freq_slider(
     hw_max_label: &str,
     display: &str,
 ) -> Option<f64> {
-    let hw_min = view.num(kind, hw_min_label).unwrap_or(0.0);
-    let hw_max = view.num(kind, hw_max_label).unwrap_or(4000.0);
-    let current = view.num(kind, label).unwrap_or(hw_min);
+    let hw_min = view.num(kind, hw_min_label);
+    let hw_max = view.num(kind, hw_max_label);
+    let current = view.num(kind, label);
 
-    let mut val = current;
+    // Sans limites matérielles fiables, pas de contrôle : état explicite.
+    let bounds_ok = matches!((hw_min, hw_max), (Some(lo), Some(hi)) if hi > lo);
+    if !bounds_ok {
+        ui.label(
+            egui::RichText::new("hardware limits unavailable")
+                .small()
+                .color(palette().muted),
+        );
+        return None;
+    }
+    let (lo, hi) = (hw_min.unwrap(), hw_max.unwrap());
+
+    // Le curseur vit sur la plage matérielle ; la valeur courante sert
+    // d'état initial (clampée), ou le minimum si aucune lecture.
+    let mut val = current.unwrap_or(lo).clamp(lo, hi);
     let response = ui.add(
-        egui::Slider::new(&mut val, hw_min..=hw_max)
+        egui::Slider::new(&mut val, lo..=hi)
             .text(display)
             .suffix(" MHz")
             .clamping(egui::SliderClamping::Always),
@@ -240,7 +379,11 @@ pub(crate) fn governor_selector(
         Some(list) if !list.is_empty() => list,
         _ => {
             // Liste indisponible → simple lecture seule
-            ui.colored_label(palette().ok_soft, &current);
+            ui.label(
+                egui::RichText::new(current.clone())
+                    .monospace()
+                    .color(palette().ok_soft),
+            );
             return None;
         }
     };
