@@ -98,7 +98,7 @@ fn set_gpu_freq(file: &str, mhz: f64) -> Result<()> {
 ///   `core_max` — valeurs exactes de chaque cœur, + `gpu_min`.
 ///
 /// Chaque champ `Option` : `None` = paramètre non touché.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Profile {
     pub name: String,
     /// Gouverneur CPU global (tous cœurs identiques).

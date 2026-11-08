@@ -4,8 +4,24 @@ version = "0.1.0"
 edition = "2021"
 description = "Power & Performance Management Dashboard - Surface Pro 7"
 
+[features]
+default = []
+## Données synthétiques : aperçu de l'UI sans élévation (utile pour le
+## design, les captures et les builds web — sysfs inaccessible depuis wasm).
+demo = []
+
 [dependencies]
 nyvoara-core = { path = "../core" }
 nyvoara-library = { path = "../library" }
-eframe = { version = "0.30", features = ["wgpu"] }
-egui_plot = "0.30"
+
+# Dioxus : la plateforme est choisie par cible de compilation.
+# - natif (desktop) : webview système via dioxus-desktop ;
+# - wasm (web) : dioxus-web — utilisé pour prévisualiser/l'UI en navigateur.
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+dioxus = { version = "0.7", features = ["desktop"] }
+tokio = { version = "1", features = ["time"] }
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+dioxus = { version = "0.7", features = ["web"] }
+gloo-timers = "0.3"
+

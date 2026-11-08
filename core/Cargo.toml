@@ -5,4 +5,6 @@ edition = "2021"
 description = "Core library of NyVoara Power & Performance Dashboard"
 
 [dependencies]
-# Standard dependencies (none needed so far except standard library)
+# Instant multi-plateforme : std::time::Instant en natif, performance.now()
+# en wasm (le type est identique en natif — coût nul).
+web-time = "1.1"

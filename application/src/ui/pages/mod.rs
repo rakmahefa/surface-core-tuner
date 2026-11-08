@@ -1,0 +1,11 @@
+//! Pages du dashboard — une par domaine.
+
+pub mod battery;
+pub mod cpu;
+pub mod gpu;
+pub mod memory;
+pub mod network;
+pub mod overview;
+pub mod profiles;
+pub mod storage;
+pub mod thermal;

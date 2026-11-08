@@ -15,7 +15,7 @@
 //! | `View` | Snapshot de rendu — copie de `latest` sous lock bref |
 
 use std::collections::{HashMap, VecDeque};
-use std::time::Instant;
+use web_time::Instant; // std::time::Instant en natif — performance.now() en wasm
 
 // ────────────────────────────────────────────
 //  Value
@@ -319,6 +319,7 @@ impl ReadLatest for Store {
 /// Mutex partagé n'est pas tenu pendant le rendu, et le thread de
 /// polling n'est jamais bloqué par une frame lente. L'historique reste
 /// dans le `Store`, lu uniquement via des locks brefs (graphes).
+#[derive(Clone, Default)]
 pub struct View {
     latest: HashMap<String, Sample>,
 }

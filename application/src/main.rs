@@ -1,20 +1,27 @@
 //! Point d'entrée — NyVoara Power & Performance Dashboard.
-//!
-//! 1. Parse les arguments
-//! 2. Auto-élévation via pkexec
-//! 3. Dispatch : profil (--apply), GUI (egui) ou CLI
 
+mod app;
+#[cfg(not(target_family = "wasm"))]
 mod args;
+#[cfg(not(target_family = "wasm"))]
 mod cli;
-mod components;
+mod data;
+mod engine;
 mod gui;
-mod themes;
+mod ui;
 
 pub use nyvoara_core::core;
 pub use nyvoara_core::paths;
 pub use nyvoara_core::profiles;
 pub use nyvoara_library as library;
 
+#[cfg(target_family = "wasm")]
+fn main() {
+    // Build web : démonstration uniquement (pas de sysfs depuis un navigateur).
+    gui::run();
+}
+
+#[cfg(not(target_family = "wasm"))]
 fn main() {
     // 1. Arguments
     let args = args::Args::parse();
@@ -77,6 +84,7 @@ fn main() {
 }
 
 /// Vérifie la disponibilité d'un serveur d'affichage.
+#[cfg(not(target_family = "wasm"))]
 fn has_display() -> bool {
     std::env::var("WAYLAND_DISPLAY").is_ok()
         || std::env::var("DISPLAY")
