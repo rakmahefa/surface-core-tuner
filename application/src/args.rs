@@ -66,23 +66,38 @@ fn is_root() -> bool {
 ///   Vulkan implicites (mangohud, gamescope-wsi) plantent ;
 /// - pas d'accès au display (WAYLAND_DISPLAY + XDG_RUNTIME_DIR, ou
 ///   DISPLAY + XAUTHORITY) ;
-/// - mangohud et autres outils injectés inopérants (MANGOHUD=1,
-///   LD_PRELOAD, layers Vulkan).
+/// - le bus de session D-Bus serait perdu → icône de notification
+///   et menu contextuel inopérants (voir [`crate::session`]).
+///
+/// `NYVOARA_SKIP_ELEVATION=1` contourne l'élévation (dev, CI,
+/// conteneurs de test sans polkit).
 pub fn ensure_elevated() {
     if is_root() {
+        return;
+    }
+
+    if env::var_os("NYVOARA_SKIP_ELEVATION").is_some_and(|v| v == "1") {
         return;
     }
 
     let exe = env::current_exe().expect("current exe path");
     let args: Vec<String> = env::args().skip(1).collect();
 
-    let status = std::process::Command::new("pkexec")
+    let status = match std::process::Command::new("pkexec")
         .arg("env")
         .args(full_env())
         .arg(&exe)
         .args(&args)
         .status()
-        .expect("failed to launch pkexec");
+    {
+        Ok(status) => status,
+        Err(e) => {
+            eprintln!("✗ Cannot elevate: pkexec failed to start ({e}).");
+            eprintln!("  Install polkit's pkexec (e.g. `apt install policykit-1`),");
+            eprintln!("  or run NyVoara as root: sudo nyvoara");
+            std::process::exit(1);
+        }
+    };
 
     std::process::exit(status.code().unwrap_or(1));
 }

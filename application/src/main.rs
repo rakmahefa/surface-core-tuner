@@ -8,6 +8,8 @@ mod cli;
 mod data;
 mod engine;
 mod gui;
+#[cfg(not(target_family = "wasm"))]
+mod session;
 mod ui;
 
 pub use nyvoara_core::core;
@@ -23,6 +25,13 @@ fn main() {
 
 #[cfg(not(target_family = "wasm"))]
 fn main() {
+    // 0. Bus de session D-Bus : l'icône de notification en dépend
+    //    (libayatana-appindicator). Avant l'élévation pour que l'adresse
+    //    reconstruite (/run/user/<uid>/bus) soit transmise au processus
+    //    root via `pkexec env` — re-exécuté dans ce dernier pour les
+    //    lancements `sudo` directs.
+    session::ensure_session_bus();
+
     // 1. Arguments
     let args = args::Args::parse();
 
@@ -67,6 +76,7 @@ fn main() {
     if args.cli {
         cli::run(args.watch);
     } else if has_display() {
+        session::warn_if_no_session_bus();
         gui::run();
     } else {
         let exe = std::env::current_exe()

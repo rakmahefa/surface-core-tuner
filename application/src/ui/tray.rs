@@ -19,9 +19,11 @@
 use crate::data::UiState;
 use dioxus::desktop::trayicon::{self, init_tray_icon, use_tray_icon};
 use dioxus::desktop::{
-    icon_from_memory, use_tray_menu_event_handler, window, WindowCloseBehaviour,
+    icon_from_memory, use_muda_event_handler, use_tray_menu_event_handler, window,
+    WindowCloseBehaviour,
 };
 use dioxus::prelude::*;
+use std::panic::AssertUnwindSafe;
 
 /// Identifiants des entrées du menu contextuel.
 mod ids {
@@ -39,12 +41,35 @@ mod ids {
 pub fn use_tray() {
     // 1. Création de l'icône et de son menu — fournie via le contexte
     //    dioxus (`use_tray_icon` la relit juste après).
+    //
+    //    Sur Linux, tray-icon dlopenne libayatana-appindicator3 : si la
+    //    bibliothèque (ou une de ses dépendances) est absente, le builder
+    //    panique et casse le rendu de toute l'interface. On s'en protège :
+    //    l'application démarre alors sans icône de notification, avec un
+    //    message explicite — la fenêtre reste utilisable normalement.
     use_hook(|| {
-        init_tray_icon(build_menu(), tray_icon());
+        let ok = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            init_tray_icon(build_menu(), tray_icon());
+        }))
+        .is_ok();
+        if !ok {
+            eprintln!("⚠ Notification area unavailable: libayatana-appindicator3 (or a dependency) is missing.");
+            eprintln!("  Install it and restart — e.g. on Debian/Ubuntu:");
+            eprintln!("    sudo apt install libayatana-appindicator3-1");
+        }
     });
 
     // 2. Menu contextuel : afficher / réduire / quitter.
-    use_tray_menu_event_handler(|event| match event.id().0.as_str() {
+    //
+    //    ⚠ Bug de routage dioxus-desktop 0.7 : muda expose UN handler global
+    //    (OnceCell — premier set_event_handler gagnant). Dioxus installe
+    //    d'abord le récepteur de la barre de menus (événements routés en
+    //    `MudaMenuEvent`), puis celui du tray — silencieusement ignoré.
+    //    Les clics du menu tray arrivent donc en `MudaMenuEvent` : on
+    //    s'abonne aux DEUX canaux pour couvrir les versions corrigées.
+    let on_menu_event = |event: &dioxus::desktop::muda::MenuEvent| {
+        eprintln!("[tray] menu event: {}", event.id().0);
+        match event.id().0.as_str() {
         ids::SHOW => {
             let w = window();
             w.set_visible(true);
@@ -62,7 +87,10 @@ pub fn use_tray() {
             w.close();
         }
         _ => {}
-    });
+        }
+    };
+    use_muda_event_handler(on_menu_event);
+    use_tray_menu_event_handler(on_menu_event);
 
     // 3. Infobulle live : batterie + charge moyenne. Le texte n'est poussé
     //    au système que lorsqu'il change (le moteur tick à 5 Hz) ; le cache
