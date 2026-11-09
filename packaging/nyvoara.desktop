@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=NyVoara
+GenericName=Power & Performance Dashboard
+Comment=Surface Pro 7 — CPU cores, thermal, battery and power profiles
+Comment[fr]=Surface Pro 7 — cœurs CPU, thermique, batterie et profils d'énergie
+Exec=/opt/nyvoara/nyvoara
+TryExec=/opt/nyvoara/nyvoara
+Icon=nyvoara
+Terminal=false
+Categories=System;Monitor;
+StartupWMClass=NyVoara
+Keywords=cpu;power;thermal;battery;surface;tuner;performance;
