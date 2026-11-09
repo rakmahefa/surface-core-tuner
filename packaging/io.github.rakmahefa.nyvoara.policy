@@ -2,20 +2,23 @@
 <!--
   NyVoara — action polkit de l'aide privilégiée.
 
-  L'interface graphique tourne SANS privilèges (icône de notification
-  fonctionnelle : elle exige le bus de session D-Bus de l'utilisateur,
-  inaccessible à un processus root). Les écritures sysfs sont déléguées à
-  l'aide one-shot :
+  L'interface graphique tourne SANS privilèges afin de conserver
+  l'accès au bus de session D-Bus et à l'icône de notification.
 
-      pkexec /opt/nyvoara/nyvoara --sysfs-write <path> <value>
-      pkexec /opt/nyvoara/nyvoara --apply <profil> --profiles-file …
+  Les opérations nécessitant des privilèges administrateur sont
+  déléguées à un processus auxiliaire lancé avec pkexec.
 
-  Cette action associe ces invocations à `auth_admin_keep` : le mot de
-  passe administrateur est demandé UNE fois puis mémorisé quelques
-  minutes — régler sa machine ne devient pas un martèlement de boîtes
-  de dialogue. Le binaire lui-même reste verrouillé sur une allowlist
-  de chemins sysfs (/sys/devices/system/cpu/, /sys/class/drm/,
-  /sys/class/power_supply/) : voir core::sysfs_writable.
+  Deux modes sont prévus :
+  - sysfs-write : écriture contrôlée dans les fichiers sysfs.
+  - apply       : application d'un profil de configuration.
+
+  Le binaire vérifie strictement les chemins et les valeurs autorisés
+  dans core::sysfs_writable.
+
+  Les chemins autorisés sont :
+  - /sys/devices/system/cpu/
+  - /sys/class/drm/
+  - /sys/class/power_supply/
 -->
 <!DOCTYPE policyconfig PUBLIC
  "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
