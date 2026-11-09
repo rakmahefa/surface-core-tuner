@@ -176,6 +176,29 @@ html, body {
 .page-sub { font-size: 12px; color: var(--text-3); margin-top: 1px; }
 .topbar-right { display: flex; align-items: center; gap: 10px; }
 
+/* Bouton icône discret — réduction vers la zone de notification */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.icon-btn:hover {
+  background: var(--card-hi);
+  border-color: var(--border);
+  color: var(--text);
+}
+.icon-btn:active { transform: translateY(0.5px); }
+.icon-btn svg { display: block; }
+
 .content {
   flex: 1;
   overflow-y: auto;

@@ -3,11 +3,14 @@
 //! - [`widgets`] : briques partagées (cartes, KPI, barres, graphes SVG,
 //!   contrôles) ;
 //! - [`shell`] : coquille applicative (barre latérale, entête, barre d'état) ;
-//! - [`pages`] : une page par domaine (Overview, Power, CPU, …).
+//! - [`pages`] : une page par domaine (Overview, Power, CPU, …) ;
+//! - [`tray`] : icône de notification et menu contextuel (desktop).
 
 pub mod icons;
 pub mod pages;
 pub mod shell;
+#[cfg(not(target_family = "wasm"))]
+pub mod tray;
 pub mod widgets;
 
 
