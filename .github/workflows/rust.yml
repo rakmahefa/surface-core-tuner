@@ -17,6 +17,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install webview dependencies (Dioxus desktop)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
@@ -37,3 +46,35 @@ jobs:
         with:
           name: rust-binary
           path: target/release/nyvoara
+
+      - name: Build web preview (demo data)
+        run: |
+          rustup target add wasm32-unknown-unknown
+          cargo install wasm-bindgen-cli --version 0.2.126 --locked
+          cargo build --release --target wasm32-unknown-unknown --features demo
+          wasm-bindgen --target web --no-typescript \
+            target/wasm32-unknown-unknown/release/nyvoara.wasm --out-dir web-dist
+          cat > web-dist/index.html <<'HTML'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <title>NyVoara — Power &amp; Performance (demo)</title>
+            <style>html, body { margin: 0; padding: 0; background: #0c0e11; }</style>
+          </head>
+          <body>
+            <div id="main"></div>
+            <script type="module">
+              import init from './nyvoara.js';
+              init();
+            </script>
+          </body>
+          </html>
+          HTML
+
+      - name: Upload web preview artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-preview-demo
+          path: web-dist
