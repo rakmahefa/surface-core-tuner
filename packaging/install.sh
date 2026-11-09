@@ -138,6 +138,8 @@ ln -sf "$APP_DIR/nyvoara" "${INSTALL_ROOT%/}/usr/local/bin/nyvoara"
 command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database -q "${INSTALL_ROOT%/}/usr/share/applications" 2>/dev/null || true
 command -v gtk-update-icon-cache   >/dev/null 2>&1 && gtk-update-icon-cache   -q -t -f "${INSTALL_ROOT%/}/usr/share/icons/hicolor" 2>/dev/null || true
 
+sudo chown -R "$USER":"$(id -gn)" "$XDG_RUNTIME_DIR/tray-icon" 
+
 ok "installation terminée"
 cat <<'EOF'
 
