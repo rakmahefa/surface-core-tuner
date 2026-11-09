@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  NyVoara — action polkit de l'aide privilégiée.
+
+  L'interface graphique tourne SANS privilèges (icône de notification
+  fonctionnelle : elle exige le bus de session D-Bus de l'utilisateur,
+  inaccessible à un processus root). Les écritures sysfs sont déléguées à
+  l'aide one-shot :
+
+      pkexec /opt/nyvoara/nyvoara --sysfs-write <path> <value>
+      pkexec /opt/nyvoara/nyvoara --apply <profil> --profiles-file …
+
+  Cette action associe ces invocations à `auth_admin_keep` : le mot de
+  passe administrateur est demandé UNE fois puis mémorisé quelques
+  minutes — régler sa machine ne devient pas un martèlement de boîtes
+  de dialogue. Le binaire lui-même reste verrouillé sur une allowlist
+  de chemins sysfs (/sys/devices/system/cpu/, /sys/class/drm/,
+  /sys/class/power_supply/) : voir core::sysfs_writable.
+-->
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+
+  <vendor>NyVoara</vendor>
+  <vendor_url>https://github.com/rakmahefa/surface-core-tuner</vendor_url>
+
+  <action id="io.github.rakmahefa.nyvoara.sysfs">
+    <description>Apply NyVoara performance settings (CPU/GPU/battery)</description>
+    <description xml:lang="fr">Appliquer les réglages NyVoara (CPU/GPU/batterie)</description>
+    <message>Authentication is required to tune CPU, GPU and power settings</message>
+    <message xml:lang="fr">Une authentification est requise pour régler le CPU, le GPU et l'énergie</message>
+
+    <defaults>
+      <allow_any>auth_admin_keep</allow_any>
+      <allow_inactive>auth_admin_keep</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+
+    <annotate key="org.freedesktop.policykit.exec.path">/opt/nyvoara/nyvoara</annotate>
+  </action>
+
+</policyconfig>

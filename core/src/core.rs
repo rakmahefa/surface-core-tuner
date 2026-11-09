@@ -358,15 +358,114 @@ pub fn read_f64(path: &str) -> Result<f64> {
         .map_err(|e| format!("parse {}: {}", path, e))
 }
 
+/// Préfixes sysfs dans lesquels l'aide privilégiée (`--sysfs-write`)
+/// accepte d'écrire. Tout chemin hors de ces arbres est refusé —
+/// l'aide tourne en root, elle ne doit jamais devenir un
+/// « écris-n'importe-quoi » générique.
+pub const SYSFS_WRITE_PREFIXES: &[&str] = &[
+    "/sys/devices/system/cpu/",
+    "/sys/class/drm/",
+    "/sys/class/power_supply/",
+];
+
+/// Vrai si le chemin est un chemin sysfs autorisé en écriture
+/// (cf. [`SYSFS_WRITE_PREFIXES`]).
+///
+/// Le chemin est vérifié **littéralement** : toute composante `..`
+/// (traversée) est rejetée — l'aide root ne doit pas être détournable
+/// vers `/sys/devices/system/cpu/../../etc/passwd`.
+pub fn sysfs_writable(path: &str) -> bool {
+    if path.split('/').any(|c| c == "..") {
+        return false;
+    }
+    SYSFS_WRITE_PREFIXES.iter().any(|p| path.starts_with(p))
+}
+
+/// Vrai si le processus tourne en root.
+pub fn is_root() -> bool {
+    std::process::Command::new("id")
+        .arg("-u")
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim() == "0")
+        .unwrap_or(false)
+}
+
 /// Écrit une valeur dans un fichier sysfs.
 /// Utilisé par les contrôles de frequency scaling (CPU/GPU).
+///
+/// # Élévation paresseuse
+///
+/// Le **processus graphique tourne sans privilèges** — c'est la condition
+/// pour que l'icône de notification s'enregistre sur le bus de session de
+/// l'utilisateur (un process root ne peut généralement pas joindre le bus
+/// de la session : icône absente, menu inerte). Les écritures sysfs sont
+/// donc déléguées, une à une, à l'aide one-shot
+/// `pkexec nyvoara --sysfs-write <path> <value>` :
+///
+/// - la première action de réglage déclenche une demande de mot de passe
+///   par l'agent polkit du bureau (KDE/GNOME) ;
+/// - la politique `io.github.rakmahefa.nyvoara.sysfs` (installée par
+///   `install.sh`) mémorise l'autorisation quelques minutes
+///   (`auth_admin_keep`) : les réglages suivants sont immédiats ;
+/// - sans agent polkit (SSH, TTY nu), l'écriture échoue proprement et
+///   l'erreur remonte dans l'interface.
+///
+/// En root (`sudo nyvoara`, ou l'aide elle-même), écriture directe.
+///
+/// L'allowlist s'applique aux DEUX branches : le processus root n'écrit
+/// jamais hors des arbres matériels, même s'il était détourné.
 pub fn write_sysfs(path: &str, value: &str) -> Result<()> {
-    std::fs::write(path, value).map_err(|e| format!("write {}: {}", path, e))
+    if !sysfs_writable(path) {
+        return Err(format!("write {path}: path outside allowed sysfs trees"));
+    }
+    if is_root() {
+        return std::fs::write(path, value).map_err(|e| format!("write {}: {}", path, e));
+    }
+    privileged_write(path, value)
+}
+
+/// Exécute l'aide privilégiée pour une écriture sysfs unique.
+/// (l'allowlist a déjà été vérifiée par [`write_sysfs`].)
+fn privileged_write(path: &str, value: &str) -> Result<()> {
+    let exe = std::env::current_exe()
+        .map(|p| p.display().to_string())
+        .map_err(|e| format!("current exe: {e}"))?;
+    let out = std::process::Command::new("pkexec")
+        .arg(&exe)
+        .arg("--sysfs-write")
+        .arg(path)
+        .arg(value)
+        .output()
+        .map_err(|e| format!("pkexec: {e} (install polkit or run as root)"))?;
+    if out.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+    match out.status.code() {
+        // 126 = auth cancel/échec (polkit) : l'utilisateur a refusé.
+        Some(126) => Err(format!("write {path}: cancelled (polkit)")),
+        Some(127) => Err(format!(
+            "write {path}: pkexec failed to run the helper — is {exe} executable?"
+        )),
+        _ => Err(format!("write {path}: {stderr}")),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sysfs_write_allowlist() {
+        assert!(sysfs_writable("/sys/devices/system/cpu/cpu3/cpufreq/scaling_governor"));
+        assert!(sysfs_writable("/sys/class/drm/card1/gt_min_freq_mhz"));
+        assert!(sysfs_writable("/sys/class/power_supply/BAT1/charge_control_end_threshold"));
+        // Hors allowlist : refus.
+        assert!(!sysfs_writable("/sys/devices/system/cpu")); // préfixe incomplet
+        assert!(!sysfs_writable("/etc/passwd"));
+        assert!(!sysfs_writable("/sys/firmware/acpi/platform_profile"));
+        assert!(!sysfs_writable("/sys/devices/system/cpu/../../etc/passwd"));
+    }
 
     #[test]
     fn mhz_autoscales_to_ghz() {

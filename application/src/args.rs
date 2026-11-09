@@ -1,12 +1,23 @@
-//! Gestion des arguments CLI et auto-élévation via pkexec.
+//! Gestion des arguments CLI et élévation explicite via pkexec.
 //!
 //! # Modes
 //!
-//! - Sans argument : GUI egui (par défaut)
-//! - `--cli` : affichage console one-shot
-//! - `--cli --watch` : affichage console continu
-//! - `--apply <nom>` : applique un profil et exit
-//! - `--list-profiles` : liste les profils disponibles
+//! - Sans argument : GUI (par défaut) — **sans élévation** : l'icône de
+//!   notification et le menu contextuel exigent le bus de session D-Bus de
+//!   l'utilisateur, inaccessible à un processus root ; les écritures sysfs
+//!   sont déléguées à l'aide `pkexec … --sysfs-write` (voir
+//!   `nyvoara_core::core::write_sysfs`) ;
+//! - `--cli` : affichage console one-shot (lecture seule, sans élévation) ;
+//! - `--cli --watch` : affichage console continu ;
+//! - `--apply <nom>` : applique un profil et exit (auto-délégué à l'aide
+//!   privilégiée hors root) ;
+//! - `--list-profiles` : liste les profils disponibles ;
+//! - `--root` : comportement historique — éève TOUT le processus (utile en
+//!   diagnostic ; l'icône tray peut alors être absente) ;
+//! - `--sysfs-write <path> <value>` : aide interne one-shot, lancée par
+//!   pkexec, jamais tapée à la main ;
+//! - `--profiles-file <path>` : utilisé par l'aide pour retrouver les
+//!   profils personnalisés de l'utilisateur (pkexec impose `HOME=/root`).
 
 use std::env;
 
@@ -16,6 +27,12 @@ pub struct Args {
     pub watch: bool,
     pub apply: Option<String>,
     pub list_profiles: bool,
+    /// Comportement historique : élever tout le processus.
+    pub root: bool,
+    /// Aide privilégiée interne : `--sysfs-write <path> <value>`.
+    pub sysfs_write: Option<(String, String)>,
+    /// Fichier de profils personnalisés explicite (aides pkexec).
+    pub profiles_file: Option<String>,
 }
 
 impl Args {
@@ -26,6 +43,9 @@ impl Args {
         let mut watch = false;
         let mut apply = None;
         let mut list_profiles = false;
+        let mut root = false;
+        let mut sysfs_write = None;
+        let mut profiles_file = None;
 
         let mut args = env::args().skip(1);
         while let Some(a) = args.next() {
@@ -33,7 +53,16 @@ impl Args {
                 "--cli" => cli = true,
                 "--watch" => watch = true,
                 "--list-profiles" => list_profiles = true,
+                "--root" => root = true,
                 "--apply" => apply = args.next(),
+                "--sysfs-write" => {
+                    let path = args.next();
+                    let value = args.next();
+                    if let (Some(p), Some(v)) = (path, value) {
+                        sysfs_write = Some((p, v));
+                    }
+                }
+                "--profiles-file" => profiles_file = args.next(),
                 _ => {}
             }
         }
@@ -43,6 +72,9 @@ impl Args {
             watch,
             apply,
             list_profiles,
+            root,
+            sysfs_write,
+            profiles_file,
         }
     }
 }
@@ -57,6 +89,10 @@ fn is_root() -> bool {
 }
 
 /// S'élève via pkexec si nécessaire.
+///
+/// Réservé au mode explicite `--root` : le mode graphique par défaut ne
+/// s'élève plus (icône de notification), les écritures passent par l'aide
+/// one-shot `--sysfs-write`.
 ///
 /// Passe **tout** l'environnement courant : `pkexec` purge
 /// l'environnement, et seul `env` peut le reconstruire dans le

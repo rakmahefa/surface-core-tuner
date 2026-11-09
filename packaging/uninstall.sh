@@ -13,6 +13,7 @@ rm -rf "${INSTALL_ROOT%/}/opt/nyvoara"
 rm -f  "${INSTALL_ROOT%/}/usr/share/applications/nyvoara.desktop"
 rm -f  "${INSTALL_ROOT%/}/usr/share/icons/hicolor/128x128/apps/nyvoara.png"
 rm -f  "${INSTALL_ROOT%/}/usr/local/bin/nyvoara"
+rm -f  "${INSTALL_ROOT%/}/usr/share/polkit-1/actions/io.github.rakmahefa.nyvoara.policy"
 
 command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database -q "${INSTALL_ROOT%/}/usr/share/applications" 2>/dev/null || true
 

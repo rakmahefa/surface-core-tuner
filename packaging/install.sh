@@ -2,11 +2,13 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # NyVoara — installateur système
 #
-# Installe l'application dans /opt/nyvoara + l'entrée de menu + l'icône :
-#   /opt/nyvoara/nyvoara                    binaire
-#   /opt/nyvoara/icon.png                   icône embarquée
-#   /usr/share/applications/nyvoara.desktop lanceur de menu
+# Installe l'application dans /opt/nyvoara + l'entrée de menu + l'icône +
+# l'action polkit :
+#   /opt/nyvoara/nyvoara                              binaire
+#   /opt/nyvoara/icon.png                             icône embarquée
+#   /usr/share/applications/nyvoara.desktop           lanceur de menu
 #   /usr/share/icons/hicolor/128x128/apps/nyvoara.png
+#   /usr/share/polkit-1/actions/io.github.rakmahefa.nyvoara.policy
 #   /usr/local/bin/nyvoara → /opt/nyvoara/nyvoara
 #
 # Usage :
@@ -15,10 +17,10 @@
 #   bash install.sh --build              force la compilation depuis les sources
 #
 # Le script :
-#   1. installe les dépendances système (apt) si absentes ;
+#   1. installe les dépendances système (apt/pacman/dnf) si absentes ;
 #   2. copie le binaire fourni ; si celui-ci est incompatible avec la
-#      libc/distibution, il bascule sur une compilation depuis GitHub ;
-#   3. installe lanceur, icône et symlink.
+#      libc/distribution, il bascule sur une compilation depuis GitHub ;
+#   3. installe lanceur, icône, action polkit et symlink.
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -39,13 +41,27 @@ if [ "${INSTALL_ROOT:-/}" = "/" ] && [ "$(id -u)" -ne 0 ]; then
 fi
 
 # ── 1. Dépendances système ───────────────────────────────────────────────────
-# webkit2gtk-4.1 (webview), gtk3 (fenêtrage), libsoup (webview), javascriptcore,
-# libxdo (raccourcis muda), libayatana-appindicator3 (icône de notification),
-# pkexec (élévation pour écrire dans sysfs).
-DEPS_APT="libwebkit2gtk-4.1-0 libgtk-3-0 libsoup-3.0-0 libjavascriptcoregtk-4.1-0 \
-libxdo3 libayatana-appindicator3-1 pkexec"
+# webkit2gtk-4.1 (webview), gtk3 (fenêtrage), libsoup (webview),
+# libxdo (raccourcis muda), libayatana-appindicator3 (icône de
+# notification), polkit/pkexec (élévation des écritures sysfs).
 
-if command -v apt-get >/dev/null 2>&1; then
+if command -v pacman >/dev/null 2>&1; then
+    # Arch / Manjaro / EndeavourOS…
+    DEPS_PACMAN="webkit2gtk-4.1 gtk3 libayatana-appindicator libxdo libsoup3 polkit"
+    MISSING=""
+    for p in $DEPS_PACMAN; do
+        pacman -Qi "$p" >/dev/null 2>&1 || MISSING="$MISSING $p"
+    done
+    if [ -n "${MISSING// /}" ]; then
+        say "installation des dépendances :${MISSING}"
+        pacman -Sy --needed --noconfirm $MISSING || warn "certaines dépendances n'ont pas pu s'installer — le script continue"
+    else
+        ok "dépendances système déjà présentes"
+    fi
+elif command -v apt-get >/dev/null 2>&1; then
+    # Debian / Ubuntu / Mint…
+    DEPS_APT="libwebkit2gtk-4.1-0 libgtk-3-0 libsoup-3.0-0 libjavascriptcoregtk-4.1-0 \
+libxdo3 libayatana-appindicator3-1 pkexec"
     MISSING=""
     for p in $DEPS_APT; do
         dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q "install ok installed" || MISSING="$MISSING $p"
@@ -64,7 +80,7 @@ if command -v apt-get >/dev/null 2>&1; then
         ok "dépendances système déjà présentes"
     fi
 else
-    warn "apt-get absent — vérifiez manuellement : $DEPS_APT"
+    warn "ni pacman ni apt-get — vérifiez manuellement : webkit2gtk-4.1, gtk3, libayatana-appindicator, libxdo, polkit"
 fi
 
 # ── 2. Installation du binaire ───────────────────────────────────────────────
@@ -79,11 +95,20 @@ binary_ok() {
 
 if [ "$FORCE_BUILD" = "--build" ] || ! binary_ok; then
     warn "le binaire fourni ne tourne pas sur ce système (libc ou dépendances) — compilation depuis les sources"
-    command -v git   >/dev/null 2>&1 || die "git est requis : sudo apt install git"
+    command -v git   >/dev/null 2>&1 || die "git est requis (pacman -S git / apt install git)"
     command -v cargo >/dev/null 2>&1 || die "cargo est requis : https://rustup.rs (rustup default stable)"
     say "clonage de $REPO_URL (branche $REPO_BRANCH)"
     rm -rf /tmp/nyvoara-build
     git clone --depth 1 --branch "$REPO_BRANCH" "$REPO_URL" /tmp/nyvoara-build
+    say "installation des dépendances de compilation…"
+    if command -v pacman >/dev/null 2>&1; then
+        # Arch : les paquets runtime embarquent les en-têtes (pas de -dev).
+        pacman -Sy --needed --noconfirm base-devel webkit2gtk-4.1 gtk3 \
+            libayatana-appindicator libxdo
+    else
+        apt-get update -qq && apt-get install -y -qq libwebkit2gtk-4.1-dev libgtk-3-dev \
+            libayatana-appindicator3-dev libxdo-dev librsvg2-dev
+    fi
     say "compilation (plusieurs minutes)…"
     (cd /tmp/nyvoara-build && cargo build --release -p nyvoara)
     install -m 0755 /tmp/nyvoara-build/target/release/nyvoara "$APP_DIR/nyvoara"
@@ -93,16 +118,25 @@ else
     ok "binaire installé : $APP_DIR/nyvoara"
 fi
 
-# ── 3. Lanceur de menu, icône, symlink ───────────────────────────────────────
+# ── 3. Lanceur de menu, icône, action polkit, symlink ────────────────────────
 install -D -m 0644 "$SRC_DIR/share/applications/nyvoara.desktop" \
     "${INSTALL_ROOT%/}/usr/share/applications/nyvoara.desktop"
 install -D -m 0644 "$SRC_DIR/share/icons/hicolor/128x128/apps/nyvoara.png" \
     "${INSTALL_ROOT%/}/usr/share/icons/hicolor/128x128/apps/nyvoara.png"
+
+# Action polkit : mémorise l'authentification de l'aide --sysfs-write
+# (auth_admin_keep) — un seul mot de passe par session de réglage.
+if [ -f "$SRC_DIR/io.github.rakmahefa.nyvoara.policy" ]; then
+    install -D -m 0644 "$SRC_DIR/io.github.rakmahefa.nyvoara.policy" \
+        "${INSTALL_ROOT%/}/usr/share/polkit-1/actions/io.github.rakmahefa.nyvoara.policy"
+    ok "action polkit installée (io.github.rakmahefa.nyvoara.sysfs)"
+fi
+
 mkdir -p "${INSTALL_ROOT%/}/usr/local/bin"
 ln -sf "$APP_DIR/nyvoara" "${INSTALL_ROOT%/}/usr/local/bin/nyvoara"
 
 command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database -q "${INSTALL_ROOT%/}/usr/share/applications" 2>/dev/null || true
-command -v gtk-update-icon-cache   >/dev/null 2>&1 && gtk-update-icon-cache -q -t -f "${INSTALL_ROOT%/}/usr/share/icons/hicolor" 2>/dev/null || true
+command -v gtk-update-icon-cache   >/dev/null 2>&1 && gtk-update-icon-cache   -q -t -f "${INSTALL_ROOT%/}/usr/share/icons/hicolor" 2>/dev/null || true
 
 ok "installation terminée"
 cat <<'EOF'
@@ -111,16 +145,25 @@ cat <<'EOF'
     • depuis le menu d'applications : « NyVoara »
     • en terminal : nyvoara  (ou /opt/nyvoara/nyvoara)
 
-  L'application s'auto-élève via pkexec (mot de passe administrateur
-  demandé) puis vit dans la barre de notification :
-    • bouton ✕          → réduit dans la zone de notification
+  L'application tourne SANS privilèges — l'icône vit dans la barre de
+  notification dès le lancement :
+    • bouton ✕           → réduit dans la zone de notification
     • clic droit (icône) → Show NyVoara / Minimize to tray / Quit
 
+  Élévation : à la première action de réglage (profil, gouverneur,
+  fréquence…), l'agent polkit du bureau demande le mot de passe
+  administrateur, puis le mémorise quelques minutes (action
+  io.github.rakmahefa.nyvoara.sysfs, auth_admin_keep). Les écritures
+  sont confinées aux arbres sysfs matériels (CPU/GPU/batterie).
+
   IMPORTANT — icône de notification : lancer depuis la session
-  graphique (menu, terminal du bureau). Un « sudo nyvoara » nu fonctionne
-  aussi (le bus D-Bus de la session est retrouvé automatiquement), mais
-  un lancement via SSH affichera l'avertissement « No D-Bus session
-  bus » et l'icône ne répondra pas.
+  graphique (menu, terminal du bureau). Un lancement via SSH
+  n'aura pas de bus D-Bus de session : l'icône sera absente et le
+  bouton ✕ quittera l'application (comportement de repli sûr).
+  `sudo nyvoara` fonctionne aussi (lectures/écritures directes)
+  mais l'icône de notification peut être absente : privilégiez le
+  mode normal, ou `nyvoara --root` pour forcer l'ancien
+  comportement (tout le processus élevé).
 
   Désinstallation : sudo bash uninstall.sh
 EOF

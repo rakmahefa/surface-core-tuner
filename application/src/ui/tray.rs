@@ -17,6 +17,7 @@
 //! - Windows/macOS : infobulle + menu au clic droit.
 
 use crate::data::UiState;
+use crate::session;
 use dioxus::desktop::trayicon::{self, init_tray_icon, use_tray_icon};
 use dioxus::desktop::{
     icon_from_memory, use_muda_event_handler, use_tray_menu_event_handler, window,
@@ -48,14 +49,33 @@ pub fn use_tray() {
     //    l'application démarre alors sans icône de notification, avec un
     //    message explicite — la fenêtre reste utilisable normalement.
     use_hook(|| {
-        let ok = std::panic::catch_unwind(AssertUnwindSafe(|| {
+        let lib_ok = std::panic::catch_unwind(AssertUnwindSafe(|| {
             init_tray_icon(build_menu(), tray_icon());
         }))
         .is_ok();
-        if !ok {
+        if !lib_ok {
             eprintln!("⚠ Notification area unavailable: libayatana-appindicator3 (or a dependency) is missing.");
-            eprintln!("  Install it and restart — e.g. on Debian/Ubuntu:");
-            eprintln!("    sudo apt install libayatana-appindicator3-1");
+            eprintln!("  Install it and restart — e.g.:");
+            eprintln!("    Debian/Ubuntu : sudo apt install libayatana-appindicator3-1");
+            eprintln!("    Arch/Manjaro  : sudo pacman -S libayatana-appindicator");
+            eprintln!("    Fedora        : sudo dnf install libayatana-appindicator-gtk3");
+        }
+        // L'icône n'est « vivante » que si la bibliothèque est chargée ET
+        // que le bus de session (enregistrement StatusNotifier + routage
+        // des clics) est joignable.
+        let alive = lib_ok && session::bus_ok();
+
+        // Garde-fou anti-« fenêtre fantôme » : sans tray fiable, ✕ QUITTE
+        // l'application au lieu de la masquer — jamais une app réduite
+        // injoignable (fenêtre cachée, aucune icône pour la restaurer,
+        // processus immortel). `window()` est consommable depuis le hook
+        // (contexte dioxus), et le hook ne s'exécute qu'au premier rendu.
+        if !alive {
+            eprintln!("⚠ Tray unavailable — the ✕ button will EXIT NyVoara instead of minimizing it.");
+            let _ = std::panic::catch_unwind(AssertUnwindSafe(|| {
+                let w = window();
+                w.set_close_behavior(WindowCloseBehaviour::WindowCloses);
+            }));
         }
     });
 

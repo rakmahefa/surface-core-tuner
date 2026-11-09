@@ -26,10 +26,9 @@ fn main() {
 #[cfg(not(target_family = "wasm"))]
 fn main() {
     // 0. Bus de session D-Bus : l'icône de notification en dépend
-    //    (libayatana-appindicator). Avant l'élévation pour que l'adresse
-    //    reconstruite (/run/user/<uid>/bus) soit transmise au processus
-    //    root via `pkexec env` — re-exécuté dans ce dernier pour les
-    //    lancements `sudo` directs.
+    //    (libayatana-appindicator). Détecté avant tout le reste pour que
+    //    l'état soit connu au moment de choisir le comportement du ✕
+    //    (voir `ui::tray` : sans bus, ✕ quitte au lieu de masquer).
     session::ensure_session_bus();
 
     // 1. Arguments
@@ -49,10 +48,46 @@ fn main() {
         return;
     }
 
-    // 2. Élévation si nécessaire
-    args::ensure_elevated();
+    // 2. Aide privilégiée one-shot `--sysfs-write <path> <value>`.
+    //    Lancée par pkexec (donc root) depuis `core::write_sysfs` —
+    //    jamais tapée à la main. Elle écrit DIRECTEMENT (pas de
+    //    re-délégation) et refuse tout chemin hors allowlist.
+    if let Some((path, value)) = &args.sysfs_write {
+        if !core::sysfs_writable(path) {
+            eprintln!("✗ Refused: {path} is outside the allowed sysfs trees.");
+            std::process::exit(1);
+        }
+        if !core::is_root() {
+            eprintln!("✗ --sysfs-write is an internal helper: run it via pkexec.");
+            std::process::exit(1);
+        }
+        if value.is_empty() || value.len() > 64 || !value.chars().all(|c| c.is_ascii_graphic()) {
+            eprintln!("✗ Refused: invalid sysfs value.");
+            std::process::exit(1);
+        }
+        match std::fs::write(path, value) {
+            Ok(()) => std::process::exit(0),
+            Err(e) => {
+                eprintln!("✗ write {path}: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
 
-    // 3. Application d'un profil (one-shot)
+    // 3. Fichier de profils explicite (aides pkexec : HOME=/root).
+    if let Some(file) = &args.profiles_file {
+        profiles::set_override_path(std::path::PathBuf::from(file));
+    }
+
+    // 4. Mode `--root` : comportement historique (tout le processus
+    //    élevé). Le mode par défaut ne s'élève PLUS — l'icône de
+    //    notification exige le bus de session de l'utilisateur.
+    if args.root {
+        args::ensure_elevated();
+    }
+
+    // 5. Application d'un profil (one-shot). Hors root, `Profile::apply`
+    //    délègue à l'aide privilégiée (une seule demande de mot de passe).
     if let Some(name) = args.apply.as_deref() {
         let all = profiles::load_all();
         match profiles::find(&all, name) {
@@ -72,7 +107,8 @@ fn main() {
         return;
     }
 
-    // 4. Dispatch
+    // 6. Dispatch — sans élévation : lectures sysfs lisibles par tous,
+    //    écritures déléguées à l'aide pkexec.
     if args.cli {
         cli::run(args.watch);
     } else if has_display() {

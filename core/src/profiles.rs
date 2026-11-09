@@ -14,6 +14,7 @@
 use crate::core::{read_f64, write_sysfs, ReadLatest, Result};
 use crate::paths;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
 // ────────────────────────────────────────────
 //  Primitives d'écriture (GUI + profils)
@@ -138,7 +139,49 @@ impl Profile {
     }
 
     /// Applique le profil (écritures sysfs immédiates).
+    ///
+    /// Hors root, l'application entière est déléguée à l'aide one-shot
+    /// `pkexec nyvoara --apply <nom> --profiles-file <fichier utilisateur>`
+    /// — une seule élévation pour tout le profil (gouverneurs + fréquences
+    /// CPU/GPU) au lieu d'un `pkexec` par écriture. Le fichier de profils
+    /// de l'utilisateur est passé explicitement : sous `pkexec`, `HOME`
+    /// vaut `/root` et les profils personnalisés seraient sinon introuvables.
     pub fn apply(&self) -> Result<()> {
+        if crate::core::is_root() {
+            return self.apply_direct();
+        }
+        let exe = std::env::current_exe()
+            .map(|p| p.display().to_string())
+            .map_err(|e| format!("current exe: {e}"))?;
+        let out = std::process::Command::new("pkexec")
+            .arg(&exe)
+            .arg("--apply")
+            .arg(&self.name)
+            .arg("--profiles-file")
+            .arg(profiles_path())
+            .output()
+            .map_err(|e| format!("pkexec: {e} (install polkit or run as root)"))?;
+        if out.status.success() {
+            if !out.stdout.is_empty() {
+                println!("{}", String::from_utf8_lossy(&out.stdout).trim());
+            }
+            return Ok(());
+        }
+        match out.status.code() {
+            Some(126) => Err("cancelled (polkit)".into()),
+            _ => {
+                let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+                Err(if stderr.is_empty() {
+                    format!("helper exited with {}", out.status)
+                } else {
+                    stderr
+                })
+            }
+        }
+    }
+
+    /// Application directe (processus déjà root).
+    fn apply_direct(&self) -> Result<()> {
         if let Some(gov) = &self.governor {
             set_cpu_governor(gov)?;
         }
@@ -393,8 +436,25 @@ pub fn names(profiles: &[Profile]) -> Vec<&str> {
 //  Persistance des profils personnalisés
 // ────────────────────────────────────────────
 
+/// Override du fichier de profils (passe `--profiles-file` des aides
+/// privilégiées) — prioritaire sur la résolution XDG/HOME.
+static OVERRIDE_PATH: OnceLock<PathBuf> = OnceLock::new();
+
+/// Impose le fichier de profils personnalisés (aide pkexec : `HOME=/root`
+/// masque le fichier réel de l'utilisateur, on le passe explicitement).
+pub fn set_override_path(path: PathBuf) {
+    let _ = OVERRIDE_PATH.set(path);
+}
+
 /// Fichier de persistance des profils personnalisés.
-fn profiles_path() -> PathBuf {
+///
+/// Public : le processus graphique le transmet à l'aide privilégiée
+/// (`--profiles-file`) pour que celle-ci retrouve les profils de
+/// l'utilisateur malgré le `HOME=/root` imposé par pkexec.
+pub fn profiles_path() -> PathBuf {
+    if let Some(p) = OVERRIDE_PATH.get() {
+        return p.clone();
+    }
     let base = std::env::var("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
