@@ -1,23 +1,33 @@
-name: Rust CI
+name: Release
+
+# Artefact release « prêt à copier-coller » : /opt/nyvoara + install.sh.
+# Déclencheurs :
+#   - push d'un tag `v*` (git tag v0.2.0 && git push origin v0.2.0)
+#   - workflow_dispatch (bouton « Run workflow »)
+# Runner ubuntu-22.04 : glibc 2.35 — compatible toutes distros plus
+# récentes (Ubuntu ≥ 22.04, Debian ≥ 12, Fedora, Arch/Manjaro…).
 
 on:
   push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+    tags: ["v*"]
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
 
+permissions:
+  contents: write # publication de la release (tags uniquement)
+
 jobs:
   build:
-    runs-on: ubuntu-latest
+    name: Build & package (linux x86_64)
+    runs-on: ubuntu-22.04
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install webview dependencies (Dioxus desktop)
+      - name: Install build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -25,7 +35,8 @@ jobs:
             libgtk-3-dev \
             libayatana-appindicator3-dev \
             librsvg2-dev \
-            libxdo-dev
+            libxdo-dev \
+            patchelf
 
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -33,49 +44,77 @@ jobs:
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
 
-      - name: Build (Debug)
-        run: cargo build --verbose
-
       - name: Run tests
-        run: cargo test --verbose
+        run: cargo test --verbose -p nyvoara-core -p nyvoara-library -p nyvoara
 
       - name: Build (Release)
-        run: cargo build --release --verbose
+        run: cargo build --release --verbose -p nyvoara
 
-      - name: Upload binary artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: rust-binary
-          path: target/release/nyvoara
-
-      - name: Build web preview (demo data)
+      - name: Assemble /opt/nyvoara artifact tree
         run: |
-          rustup target add wasm32-unknown-unknown
-          cargo install wasm-bindgen-cli --version 0.2.126 --locked
-          cargo build --release --target wasm32-unknown-unknown --features demo
-          wasm-bindgen --target web --no-typescript \
-            target/wasm32-unknown-unknown/release/nyvoara.wasm --out-dir web-dist
-          cat > web-dist/index.html <<'HTML'
-          <!DOCTYPE html>
-          <html lang="en">
-          <head>
-            <meta charset="utf-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1">
-            <title>NyVoara — Power &amp; Performance (demo)</title>
-            <style>html, body { margin: 0; padding: 0; background: #0c0e11; }</style>
-          </head>
-          <body>
-            <div id="main"></div>
-            <script type="module">
-              import init from './nyvoara.js';
-              init();
-            </script>
-          </body>
-          </html>
-          HTML
+          ARTIFACT=nyvoara-linux-x86_64
+          mkdir -p "$ARTIFACT/opt/nyvoara" \
+                   "$ARTIFACT/share/applications" \
+                   "$ARTIFACT/share/icons/hicolor/128x128/apps"
 
-      - name: Upload web preview artifact
+          # Binaire : strip (aucune dépendance au runner).
+          strip --strip-all target/release/nyvoara
+          install -m 0755 target/release/nyvoara "$ARTIFACT/opt/nyvoara/nyvoara"
+          install -m 0644 application/assets/icon.png "$ARTIFACT/opt/nyvoara/icon.png"
+
+          # Lanceur de menu + icône hicolor + scripts + action polkit.
+          install -m 0644 packaging/nyvoara.desktop \
+            "$ARTIFACT/share/applications/nyvoara.desktop"
+          install -m 0644 packaging/nyvoara.png \
+            "$ARTIFACT/share/icons/hicolor/128x128/apps/nyvoara.png"
+          install -m 0755 packaging/install.sh   "$ARTIFACT/install.sh"
+          install -m 0755 packaging/uninstall.sh "$ARTIFACT/uninstall.sh"
+          install -m 0644 packaging/io.github.rakmahefa.nyvoara.policy \
+            "$ARTIFACT/io.github.rakmahefa.nyvoara.policy"
+          install -m 0644 packaging/README.md    "$ARTIFACT/README.md"
+
+          # Sanity check : le binaire assemblé démarre.
+          "$ARTIFACT/opt/nyvoara/nyvoara" --list-profiles
+
+          tar -czf "$ARTIFACT.tar.gz" "$ARTIFACT"
+          sha256sum "$ARTIFACT.tar.gz" > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          tar -tzf "$ARTIFACT.tar.gz"
+
+      - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: web-preview-demo
-          path: web-dist
+          name: nyvoara-linux-x86_64
+          path: nyvoara-linux-x86_64.tar.gz
+          retention-days: 30
+
+      - name: Upload checksum
+        uses: actions/upload-artifact@v4
+        with:
+          name: SHA256SUMS
+          path: SHA256SUMS.txt
+          retention-days: 30
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: nyvoara-linux-x86_64
+      - name: Download checksum
+        uses: actions/download-artifact@v4
+        with:
+          name: SHA256SUMS
+
+      - name: Create release with artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            nyvoara-linux-x86_64.tar.gz
+            SHA256SUMS.txt
