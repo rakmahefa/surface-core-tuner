@@ -26,6 +26,12 @@ pub fn App() -> Element {
     provide_context(page);
     provide_context(form);
 
+    // Desktop : icône de notification + menu contextuel (réduction de la
+    // fenêtre dans la barre de notification). Après les `provide_context`
+    // car le hook lit l'état machine pour l'infobulle.
+    #[cfg(not(target_family = "wasm"))]
+    crate::ui::tray::use_tray();
+
     // ── Boucle de données ──
     // Le moteur vit dans un `use_ref` (léger, non cloné) ; la tâche async
     // tick toutes les 200 ms : lecture sysfs (quelques ms), snapshot, push

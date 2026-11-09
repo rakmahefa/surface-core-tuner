@@ -113,3 +113,14 @@ pub fn ArrowUp() -> Element {
 pub fn ArrowDown() -> Element {
     svg_shell(rsx! { path { d: "M12 5v14M6 13l6 6 6-6" } })
 }
+
+/// Réduction vers la zone de notification — écran avec panneau bas et
+/// flèche descendante. (Consommé par la coquille desktop uniquement.)
+#[cfg_attr(target_family = "wasm", allow(dead_code))]
+pub fn ToTray() -> Element {
+    svg_shell(rsx! {
+        rect { x: "3", y: "3", width: "18", height: "18", rx: "2" }
+        path { d: "M3 15h18" }
+        path { d: "M12 5.5v6.6M8.8 8.9 12 12.1l3.2-3.2" }
+    })
+}

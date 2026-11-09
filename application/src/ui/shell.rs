@@ -141,9 +141,36 @@ fn Topbar(page: Page) -> Element {
                 {battery_chip}
                 {ac_chip}
                 {profile_chip}
+                TrayButton {}
             }
         }
     }
+}
+
+/// Bouton « réduire dans la barre de notification » — desktop uniquement.
+/// Masque la fenêtre (l'application continue en tâche de fond) ; on la
+/// restaure par un clic gauche sur l'icône de notification ou via son
+/// menu contextuel.
+#[cfg(not(target_family = "wasm"))]
+#[component]
+fn TrayButton() -> Element {
+    rsx! {
+        button {
+            class: "icon-btn",
+            r#type: "button",
+            title: "Minimize to tray",
+            aria_label: "Minimize to tray",
+            onclick: move |_| dioxus::desktop::window().set_visible(false),
+            icons::ToTray {}
+        }
+    }
+}
+
+/// Web : pas de zone de notification — pas de bouton.
+#[cfg(target_family = "wasm")]
+#[component]
+fn TrayButton() -> Element {
+    VNode::empty()
 }
 
 #[component]
